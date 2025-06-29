@@ -55,15 +55,21 @@ class ClassifierGuidance:
                 latent_for_grad = x.detach().clone()
                 latent_for_grad.requires_grad_()
 
-                sigma_tensor = torch.full((latent_for_grad.shape[0],), sigma, device=latent_for_grad.device)
+                # sigma is a tensor, but torch.full expects a scalar
+                sigma_tensor = torch.full((latent_for_grad.shape[0],), sigma.item(), device=latent_for_grad.device)
 
-                # Step 2: Predict the Clean Image (pred_x0) by running the model
+                # Get the noise prediction (epsilon) from the model.
                 uncond_pred = model.apply_model(latent_for_grad, sigma_tensor, cond=uncond)
                 cond_pred = model.apply_model(latent_for_grad, sigma_tensor, cond=cond)
-                denoised_latent = uncond_pred + cond_scale * (cond_pred - uncond_pred)
+                noise_pred = uncond_pred + cond_scale * (cond_pred - uncond_pred)
                 
-                # Step 3: Obtain the CLIP Embedding
-                image = vae.decode(denoised_latent)
+                # --- Correctly calculate pred_x0 ---
+                # The model predicts noise (epsilon), not the clean image.
+                # We derive pred_x0 from the noisy latent (x) and the predicted noise.
+                pred_x0 = latent_for_grad - sigma * noise_pred
+
+                # Step 3: Obtain the CLIP Embedding from the *predicted clean image*
+                image = vae.decode(pred_x0)
                 embedding = clip.encode_image(image)
 
                 # Step 4: Calculate the "Loss" from the classifier
