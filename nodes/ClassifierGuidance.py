@@ -12,7 +12,6 @@ class ClassifierGuidance:
                 "vae": ("VAE",),
                 "classifier": ("CLASSIFIER",), # Expects a node that returns a classifier object with a .classify(embedding) method
                 "guidance_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 100.0, "step": 0.1}),
-                "positive_guidance": ("BOOLEAN", {"default": True}),
                 "start_step": ("INT", {"default": 0, "min": 0, "max": 10000}),
                 "end_step": ("INT", {"default": 9999, "min": 0, "max": 10000}),
             },
@@ -25,7 +24,7 @@ class ClassifierGuidance:
     FUNCTION = "apply_guidance"
     CATEGORY = "latent/guidance"
 
-    def apply_guidance(self, model, clip, vae, classifier, guidance_scale, positive_guidance, start_step, end_step, prev_hook=None):
+    def apply_guidance(self, model, clip, vae, classifier, guidance_scale, start_step, end_step, prev_hook=None):
         
         prev_callback = prev_hook[0] if prev_hook is not None else None
 
@@ -73,13 +72,15 @@ class ClassifierGuidance:
                 embedding = clip.encode_image(image)
 
                 # Step 4: Calculate the "Loss" from the classifier
-                # Assumes the classifier object has a method like .classify(embedding)
-                score = classifier.classify(embedding.float())
-                
-                if positive_guidance:
-                    loss = -torch.sum(score) # Maximize score
-                else:
-                    loss = torch.sum(score) # Minimize score
+                # The aggregator returns a tensor of scores, with negative classifiers already inverted.
+                scores = classifier.classify(embedding.float())
+                if scores.numel() == 0: # Check if any classifiers were loaded
+                    return x # Skip guidance if no classifiers are active
+
+                # We want to maximize all scores in the tensor.
+                # Since negative classifiers already have their scores inverted by the loader,
+                # we can use a single, simple loss function.
+                loss = -torch.sum(scores)
 
                 # Step 5: Compute the Guidance Gradient
                 loss.backward()
