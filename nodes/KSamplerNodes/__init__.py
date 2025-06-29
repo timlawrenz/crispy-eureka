@@ -47,11 +47,34 @@ if not hasattr(comfy.k_diffusion.sampling, 'KSAMPLER_ADV_HIJACK'):
             if hook_func is None:
                 return original_sampler_func(model, x, sigmas, *args, **kwargs)
 
+            import inspect
+            sig = inspect.signature(hook_func)
+            
             original_callback = kwargs.get('callback', None)
             
             def new_callback(data):
-                # Apply the hook function to the latent 'x' at the current step
-                data['x'] = hook_func(x=data['x'], step=data['i'], sigma=data['sigma'])
+                # Prepare arguments for the hook function based on its signature.
+                # This allows for simple hooks (e.g., def hook(x)) and advanced hooks.
+                hook_kwargs = {'x': data['x']}
+                
+                # Check if the hook accepts **kwargs to pass everything
+                if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                    hook_kwargs.update(kwargs.get('extra_args', {}))
+                    hook_kwargs['step'] = data['i']
+                    hook_kwargs['sigma'] = data['sigma']
+                else: # Otherwise, pass only the parameters it explicitly asks for
+                    if 'step' in sig.parameters:
+                        hook_kwargs['step'] = data['i']
+                    if 'sigma' in sig.parameters:
+                        hook_kwargs['sigma'] = data['sigma']
+                    if any(p in sig.parameters for p in ['cond', 'uncond', 'cond_scale']):
+                        extra_args = kwargs.get('extra_args', {})
+                        if 'cond' in sig.parameters: hook_kwargs['cond'] = extra_args.get('cond')
+                        if 'uncond' in sig.parameters: hook_kwargs['uncond'] = extra_args.get('uncond')
+                        if 'cond_scale' in sig.parameters: hook_kwargs['cond_scale'] = extra_args.get('cond_scale')
+
+                # Call the hook and update the latent
+                data['x'] = hook_func(**hook_kwargs)
                 
                 if original_callback is not None:
                     original_callback(data)
